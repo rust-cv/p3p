@@ -1,0 +1,23 @@
+[package]
+name = "p3p"
+version = "0.1.0"
+authors = ["Matthieu Pizenberg <matthieu.pizenberg@gmail.com>"]
+edition = "2018"
+
+description = "Camera pose estimation given 3D points and corresponding pixel coordinates"
+homepage = "https://github.com/rust-photogrammetry/p3p"
+repository = "https://github.com/rust-photogrammetry/p3p"
+readme = "README.md"
+keywords = ["p3p", "pnp", "slam", "vision"] # up to 5 keywords
+categories = ["science::robotics", "multimedia::video"] # up to 5 categories, cf crates.io/category_slugs
+license = "MPL-2.0" # SPDX license
+
+[dependencies.nalgebra]
+version = "0.18.1"
+default-features = false
+# features = []
+
+[dev-dependencies]
+approx = "0.3"
+quickcheck = "0.8"
+quickcheck_macros = "0.8"
