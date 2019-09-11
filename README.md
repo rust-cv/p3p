@@ -9,3 +9,9 @@ Persson, M. and Nordberg, K. ECCV 2018.
 TODO:
  - [ ] Improve readme
  - [ ] Improve documentation
+
+
+Run clippy with:
+```
+touch src/lib.rs; cargo clippy -- -W clippy::all -W clippy::nursery -W clippy::pedantic
+```
