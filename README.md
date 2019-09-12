@@ -51,5 +51,11 @@ To run clippy:
 touch src/lib.rs; cargo clippy -- -W clippy::all -W clippy::nursery -W clippy::pedantic
 ```
 
+To build the documentation with math formatted by katex:
+
+```
+RUSTDOCFLAGS="--html-in-header katex-header.html" cargo doc --no-deps
+```
+
 [rustfmt]: https://github.com/rust-lang/rustfmt
 [clippy]: https://github.com/rust-lang/rust-clippy
