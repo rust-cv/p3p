@@ -375,18 +375,26 @@ fn compute_poses_nordberg(
 
     // Helper closure to estimate possible depths values.
     // CF equation (16) in paper.
-    // TODO: There is potentially a mistake here since
-    // |b23| <= 2.0 and not 1.0 as the paper states.
-    // CF https://github.com/openMVG/openMVG/issues/1597#issuecomment-530491079
-    //
-    // I believe currently this may result in NaN.
-    // So the triplet will not be added to lambdas when checking condition l1 >= 0.
     let possible_depths = |tau: f32, w0: f32, w1: f32| {
         let d = a23 / (tau * (b23 + tau) + 1.0);
-        let l2 = d.sqrt();
-        let l3 = tau * l2;
-        let l1 = w0 * l2 + w1 * l3;
-        (l1, l2, l3)
+        if d > 0.0 {
+            let l2 = d.sqrt();
+            let l3 = tau * l2;
+            let l1 = w0 * l2 + w1 * l3;
+            (true, l1, l2, l3)
+        } else {
+            (false, 0.0, 0.0, 0.0)
+        }
+    };
+
+    // Helper closure pushing one potential solution.
+    let mut push_solution = |tau: f32, w0: f32, w1: f32| {
+        if tau > 0.0 {
+            let (valid, l1, l2, l3) = possible_depths(tau, w0, w1);
+            if valid && l1 >= 0.0 {
+                lambdas.push(Vec3::new(l1, l2, l3));
+            }
+        }
     };
 
     // Helper closure pushing two potential solutions
@@ -395,18 +403,8 @@ fn compute_poses_nordberg(
         let (w0, w1, b, c) = quadratic_coefficients(ratio);
         if b * b - 4.0 * c >= 0.0 {
             let (_, tau1, tau2) = root2real(b, c);
-            if tau1 > 0.0 {
-                let (l1, l2, l3) = possible_depths(tau1, w0, w1);
-                if l1 >= 0.0 {
-                    lambdas.push(Vec3::new(l1, l2, l3));
-                }
-            }
-            if tau2 > 0.0 {
-                let (l1, l2, l3) = possible_depths(tau2, w0, w1);
-                if l1 >= 0.0 {
-                    lambdas.push(Vec3::new(l1, l2, l3));
-                }
-            }
+            push_solution(tau1, w0, w1);
+            push_solution(tau2, w0, w1);
         }
     };
 
