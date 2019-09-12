@@ -6,6 +6,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+//! Implementation based on
+//! "Lambda Twist: An Accurate Fast Robust Perspective Three Point (P3P) Solver"
+//! Persson, M. and Nordberg, K. ECCV 2018.
+//! Reference implementation available on the [author github repository][lambda-twist-github].
+//!
+//! [lambda-twist-github]: https://github.com/midjji/lambdatwist-p3p
+
 use nalgebra::{Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector3, Vector4};
 
 type Iso3 = Isometry3<f32>;
@@ -13,15 +20,50 @@ type Mat3 = Matrix3<f32>;
 type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
 
+/// Pose of a camera (almost) returned by the `solve` function.
+/// Beware that the result of the `solve` function isn't exactly the
+/// rotation and translation of the camera itself in world coordinates.
+/// It is the rotation and translation pair satisfying the equation:
+/// $$
+/// \lambda_i \ \bm{y_i} = \bm{R \ x_i} + \bm{t},\quad i \in \\{1, 2, 3\\}
+/// $$
+///
+/// - $\bm{x_i}$ are the 3D point world coordinates.
+/// - $\bm{y_i}$ are the image coordinates $\bm{y_i} \ \text{\textasciitilde} \ (u_i, v_i, 1)$
+///   also sometimes called "bearing vectors".
+/// - $\lambda_i$ are the signed distances from the camera.
+///
+/// The rotation and pose of the camera itself can easily be retrieved knowing that:
+///
+/// $$
+/// \begin{cases}
+///     \bm{R_{cam}} = \bm{R^T} \\\\
+///     \bm{t_{cam}} = \bm{-R_{cam} \ t}
+/// \end{cases}
+/// $$
 #[derive(Debug, Copy, Clone)]
 pub struct Pose {
+    /// Rotation given as a unit quaternion of the form `[x, y, z, w]`
+    /// where the real coefficient is the last one.
     pub rotation: [f32; 4],
+
+    /// Translation.
     pub translation: [f32; 3],
 }
 
-/// Solve the absolute camera pose problem.
-/// Use "Lambda Twist: An Accurate Fast Robust Perspective Three Point (P3P) Solver"
-/// Persson, M.; Nordberg, K.
+/// Return 0 to 4 potential $(\bm{R}, \bm{t})$ solutions to the equation:
+/// $$
+/// \lambda_i \ \bm{y_i} = \bm{R \ x_i} + \bm{t},\quad i \in \\{1, 2, 3\\}
+/// $$
+///
+/// - $\bm{x_i}$ are the 3D point world coordinates.
+/// - $\bm{y_i}$ are the image coordinates $\bm{y_i} \ \text{\textasciitilde} \ (u_i, v_i, 1)$
+///   also sometimes called "bearing vectors".
+/// - $\lambda_i$ are the signed distances from the camera.
+///
+/// The input arguments should be considered as
+/// `world_3d_points = [` $\bm{x_1}, \bm{x_2}, \bm{x_3}$ `]`
+/// and similarly for `bearing_vectors`.
 pub fn solve(world_3d_points: &[[f32; 3]; 3], bearing_vectors: &[[f32; 3]; 3]) -> Vec<Pose> {
     compute_poses_nordberg(world_3d_points, bearing_vectors)
         .into_iter()
@@ -33,7 +75,7 @@ pub fn solve(world_3d_points: &[[f32; 3]; 3], bearing_vectors: &[[f32; 3]; 3]) -
         .collect()
 }
 
-/// Compute the angular residual between the bearing vector and the 3d point projection vector.
+/// Compute the angular residual between the bearing vector and the 3D point projection vector.
 /// Return `1 - cos(angle)`.
 pub fn error(point_3d: &[f32; 3], bearing_vector: &[f32; 3], pose: &Pose) -> f32 {
     let new_bearing = (pose.to_iso3() * Vec3::from(*point_3d)).normalize();
