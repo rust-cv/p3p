@@ -18,9 +18,9 @@ Implementation based on
 "Lambda Twist: An Accurate Fast Robust Perspective Three Point (P3P) Solver"
 Persson, M. and Nordberg, K. ECCV 2018.
 
-TODO:
- - [ ] Improve readme
- - [ ] Improve documentation
+Reference implementation available on the [author github repository][lambda-twist-github].
+
+[lambda-twist-github]: https://github.com/midjji/lambdatwist-p3p
 
 ## License
 
