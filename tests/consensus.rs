@@ -19,10 +19,10 @@ fn arrsac() {
     let mut arrsac = Arrsac::new(Config::new(0.01), SmallRng::from_seed([0; 16]));
 
     // Define some points in camera coordinates (with z > 0).
-    let p1_cam = [-0.228_125, -0.061_458_334, 1.0];
-    let p2_cam = [0.418_75, -0.581_25, 2.0];
-    let p3_cam = [1.128_125, 0.878_125, 3.0];
-    let p4_cam = [-0.128_125, 0.578_125, 1.5];
+    let p1_cam = [-20.228_125, -0.061_458_334, 1.0];
+    let p2_cam = [-50.418_75, -0.581_25, 2.0];
+    let p3_cam = [1.128_125, 5.878_125, 3.0];
+    let p4_cam = [-0.128_125, 0.578_125, 40.5];
 
     // Define the camera pose.
     let rot = UnitQuaternion::from_euler_angles(0.1, 0.2, 0.3);
@@ -60,7 +60,10 @@ type V3 = (f32, f32, f32);
 /// Run `cargo test -- --ignored` to test it.
 #[quickcheck]
 fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3, p4: V3) -> bool {
-    let mut arrsac = Arrsac::new(Config::new(0.01), SmallRng::from_seed([0; 16]));
+    let mut arrsac = Arrsac::new(
+        Config::new(0.01).max_candidate_hypotheses(10),
+        SmallRng::from_seed([0; 16]),
+    );
 
     // Use EPSILON_APPROX to force minimum distance.
     let p1_cam = [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()];
@@ -76,7 +79,7 @@ fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3, p4: V3) -> bo
     let p2ds = [p1_2d, p2_2d, p3_2d, p4_2d];
 
     // Stop if the keypoint's location on the frame is too close.
-    for (a, b) in p2ds.iter().cartesian_product(&p2ds) {
+    for (a, b) in p2ds.iter().tuple_combinations() {
         if (a - b).norm() < EPSILON_APPROX {
             return true;
         }

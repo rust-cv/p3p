@@ -18,10 +18,13 @@ mod consensus;
 #[cfg(feature = "consensus")]
 pub use consensus::*;
 
-use nalgebra::{Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{
+    Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector2, Vector3, Vector4,
+};
 
 type Iso3 = Isometry3<f32>;
 type Mat3 = Matrix3<f32>;
+type Vec2 = Vector2<f32>;
 type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
 
@@ -571,9 +574,16 @@ mod tests {
         let p3_2d = Vector2::new(p3_cam[0], p3_cam[1]);
         let p2ds = [p1_2d, p2_2d, p3_2d];
 
+        // Stop if points are colinear.
+        for (a, b, c) in p2ds.iter().tuple_combinations() {
+            if ((a - b).normalize()).dot(&(a - c).normalize()) > 1.0 - 10.0 * EPSILON_APPROX {
+                return true;
+            }
+        }
+
         // Stop if the keypoint's location on the frame is too close.
-        for (a, b) in p2ds.iter().cartesian_product(&p2ds) {
-            if (a - b).norm() < EPSILON_APPROX {
+        for (a, b) in p2ds.iter().tuple_combinations() {
+            if (a - b).norm() < 10.0 * EPSILON_APPROX {
                 return true;
             }
         }
