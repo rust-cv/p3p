@@ -507,7 +507,9 @@ fn compute_poses_nordberg(samples: [Sample; 3]) -> Vec<(Mat3, Vec3)> {
 mod tests {
     use super::*;
     use approx::{assert_relative_eq, relative_eq};
+    use itertools::Itertools;
     use nalgebra::Point3;
+    use quickcheck_macros::quickcheck;
 
     type V3 = (f32, f32, f32);
 
@@ -557,28 +559,26 @@ mod tests {
     // Failures log at EPSILON_APPROX = 1e-3: (very long running times)
     // (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 15.0, 35.420532), (89.0, 0.0, 30.208725)
 
+    /// This test is ignored because it is random and may fail in CI.
+    /// Run `cargo test -- --ignored` to test it.
+    #[quickcheck]
     fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3) -> bool {
         // Use EPSILON_APPROX to force minimum distance.
         let p1_cam = [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()];
         let p2_cam = [p2.0, p2.1, EPSILON_APPROX + p2.2.abs()];
         let p3_cam = [p3.0, p3.1, EPSILON_APPROX + p3.2.abs()];
 
-        // Stop if points are colinear.
-        let d12 = Vec3::from(p1_cam) - Vec3::from(p2_cam);
-        let d13 = Vec3::from(p1_cam) - Vec3::from(p3_cam);
-        if d12.norm() < EPSILON_APPROX || d13.norm() < EPSILON_APPROX {
-            return true;
-        }
-        let cosine = d12.normalize().dot(&d13.normalize());
-        if cosine.abs() > 1.0 - EPSILON_APPROX {
-            return true;
-        }
+        // 2d keypoints
+        let p1_2d = Vector2::new(p1_cam[0], p1_cam[1]);
+        let p2_2d = Vector2::new(p2_cam[0], p2_cam[1]);
+        let p3_2d = Vector2::new(p3_cam[0], p3_cam[1]);
+        let p2ds = [p1_2d, p2_2d, p3_2d];
 
-        // Also stop if points are orthogonal (weird but it makes it fail).
-        // Example failure detected by quickcheck:
-        // p1 = (0, 0, 0)   p2 = (0, 0, 1)   p3 = (0, 3, 0)
-        if cosine.abs() < EPSILON_APPROX {
-            return true;
+        // Stop if the keypoint's location on the frame is too close.
+        for (a, b) in p2ds.iter().cartesian_product(&p2ds) {
+            if (a - b).norm() < EPSILON_APPROX {
+                return true;
+            }
         }
 
         // Define the camera pose.
@@ -599,9 +599,6 @@ mod tests {
 
         // Estimate potential poses with P3P.
         let poses = solve(samples);
-        if poses.is_empty() {
-            eprintln!("cosine: {}", cosine);
-        }
         assert!(!poses.is_empty());
 
         // Check that at least one estimated pose is near solution.
