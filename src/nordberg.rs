@@ -18,13 +18,10 @@ mod consensus;
 #[cfg(feature = "consensus")]
 pub use consensus::*;
 
-use nalgebra::{
-    Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector2, Vector3, Vector4,
-};
+use nalgebra::{Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector3, Vector4};
 
 type Iso3 = Isometry3<f32>;
 type Mat3 = Matrix3<f32>;
-type Vec2 = Vector2<f32>;
 type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
 
@@ -32,9 +29,9 @@ type Vec4 = Vector4<f32>;
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct Sample {
     /// The 3d point in world-space
-    pub point: [f32; 3],
+    pub world: [f32; 3],
     /// The 2d point in camera-space
-    pub bearing: [f32; 3],
+    pub camera: [f32; 3],
 }
 
 /// Pose of a camera (almost) returned by the `solve` function.
@@ -113,9 +110,9 @@ impl Pose {
 
     /// Compute the angular residual between the bearing vector and the 3D point projection vector.
     /// Return `1 - cos(angle)`.
-    pub fn error(&self, Sample { point, bearing }: &Sample) -> f32 {
-        let new_bearing = (self.to_iso3() * Vec3::from(*point)).normalize();
-        let bearing_vector = Vec3::from(*bearing).normalize();
+    pub fn error(&self, Sample { world, camera }: &Sample) -> f32 {
+        let new_bearing = (self.to_iso3() * Vec3::from(*world)).normalize();
+        let bearing_vector = Vec3::from(*camera).normalize();
         1.0 - bearing_vector.dot(&new_bearing)
     }
 }
@@ -338,14 +335,14 @@ fn eigen_decomposition_singular(x: Mat3) -> (Mat3, Vec3) {
 /// The 3x3 matrix `bearing_vectors` contains one homogeneous image coordinate per column.
 fn compute_poses_nordberg(samples: [Sample; 3]) -> Vec<(Mat3, Vec3)> {
     // Extraction of 3D points vectors
-    let wp1 = Vec3::from(samples[0].point);
-    let wp2 = Vec3::from(samples[1].point);
-    let wp3 = Vec3::from(samples[2].point);
+    let wp1 = Vec3::from(samples[0].world);
+    let wp2 = Vec3::from(samples[1].world);
+    let wp3 = Vec3::from(samples[2].world);
 
     // Extraction of feature vectors
-    let f1 = Vec3::from(samples[0].bearing).normalize();
-    let f2 = Vec3::from(samples[1].bearing).normalize();
-    let f3 = Vec3::from(samples[2].bearing).normalize();
+    let f1 = Vec3::from(samples[0].camera).normalize();
+    let f2 = Vec3::from(samples[1].camera).normalize();
+    let f3 = Vec3::from(samples[2].camera).normalize();
 
     // Compute vectors between 3D points.
     let d12 = wp1 - wp2;
@@ -508,15 +505,15 @@ mod tests {
     use super::*;
     use approx::{assert_relative_eq, relative_eq};
     use itertools::Itertools;
-    use nalgebra::Point3;
+    use nalgebra::{Point3, Vector2};
     use quickcheck_macros::quickcheck;
 
     type V3 = (f32, f32, f32);
 
     const EPSILON_APPROX: f32 = 1e-2;
 
-    fn sample_conv(point: [f32; 3], bearing: [f32; 3]) -> Sample {
-        Sample { point, bearing }
+    fn sample_conv(world: [f32; 3], camera: [f32; 3]) -> Sample {
+        Sample { world, camera }
     }
 
     #[test]

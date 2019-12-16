@@ -10,8 +10,8 @@ use sample_consensus::Consensus;
 
 const EPSILON_APPROX: f32 = 1e-2;
 
-fn sample_conv(point: [f32; 3], bearing: [f32; 3]) -> Sample {
-    Sample { point, bearing }
+fn sample_conv(world: [f32; 3], camera: [f32; 3]) -> Sample {
+    Sample { world, camera }
 }
 
 #[test]
