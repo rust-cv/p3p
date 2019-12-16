@@ -12,15 +12,21 @@ keywords = ["p3p", "pnp", "slam", "vision"] # up to 5 keywords
 categories = ["science::robotics", "multimedia::video"] # up to 5 categories, cf crates.io/category_slugs
 license = "MPL-2.0" # SPDX license
 
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "katex-header.html" ]
+
+[features]
+default = []
+consensus = ["sample-consensus"]
+
+[dependencies]
+sample-consensus = { version = "0.1.0", optional = true }
+
 [dependencies.nalgebra]
 version = "0.18.1"
 default-features = false
-# features = []
 
 [dev-dependencies]
 approx = "0.3"
-quickcheck = "0.8"
-quickcheck_macros = "0.8"
-
-[package.metadata.docs.rs]
-rustdoc-args = [ "--html-in-header", "katex-header.html" ]
+arrsac = "0.1.0"
+rand = { version = "0.7.2", features = ["small_rng"] }

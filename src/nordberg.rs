@@ -13,12 +13,29 @@
 //!
 //! [lambda-twist-github]: https://github.com/midjji/lambdatwist-p3p
 
-use nalgebra::{Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector3, Vector4};
+#[cfg(feature = "consensus")]
+mod consensus;
+#[cfg(feature = "consensus")]
+pub use consensus::*;
+
+use nalgebra::{
+    Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector2, Vector3, Vector4,
+};
 
 type Iso3 = Isometry3<f32>;
 type Mat3 = Matrix3<f32>;
+type Vec2 = Vector2<f32>;
 type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
+
+/// A sample correspondence between a 3d point an a 2d image point.
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub struct Sample {
+    /// The 3d point in world-space
+    pub point: [f32; 3],
+    /// The 2d point in camera-space
+    pub bearing: [f32; 3],
+}
 
 /// Pose of a camera (almost) returned by the `solve` function.
 /// Beware that the result of the `solve` function isn't exactly the
@@ -64,8 +81,8 @@ pub struct Pose {
 /// The input arguments should be considered as
 /// `world_3d_points = [` $\bm{x_1}, \bm{x_2}, \bm{x_3}$ `]`
 /// and similarly for `bearing_vectors`.
-pub fn solve(world_3d_points: &[[f32; 3]; 3], bearing_vectors: &[[f32; 3]; 3]) -> Vec<Pose> {
-    compute_poses_nordberg(world_3d_points, bearing_vectors)
+pub fn solve(samples: [Sample; 3]) -> Vec<Pose> {
+    compute_poses_nordberg(samples)
         .into_iter()
         .map(|(rot, trans)| {
             let rotation = UnitQuaternion::from_matrix(&rot);
@@ -75,19 +92,11 @@ pub fn solve(world_3d_points: &[[f32; 3]; 3], bearing_vectors: &[[f32; 3]; 3]) -
         .collect()
 }
 
-/// Compute the angular residual between the bearing vector and the 3D point projection vector.
-/// Return `1 - cos(angle)`.
-pub fn error(point_3d: &[f32; 3], bearing_vector: &[f32; 3], pose: &Pose) -> f32 {
-    let new_bearing = (pose.to_iso3() * Vec3::from(*point_3d)).normalize();
-    let bearing_vector = Vec3::from(*bearing_vector).normalize();
-    1.0 - bearing_vector.dot(&new_bearing)
-}
-
 // Private functions ###########################################################
 
 impl Pose {
     /// Convert from nalgebra Isometry3 type.
-    fn from_iso3(iso3: Iso3) -> Self {
+    pub fn from_iso3(iso3: Iso3) -> Self {
         Self {
             rotation: iso3.rotation.into_inner().coords.into(),
             translation: iso3.translation.vector.into(),
@@ -95,11 +104,19 @@ impl Pose {
     }
 
     /// Convert to nalgebra Isometry3 type.
-    fn to_iso3(&self) -> Iso3 {
+    pub fn to_iso3(&self) -> Iso3 {
         let rot_quat = Quaternion::from(Vec4::from(self.rotation));
         let rot = UnitQuaternion::from_quaternion(rot_quat);
         let trans = Translation::from(Vec3::from(self.translation));
         Iso3::from_parts(trans, rot)
+    }
+
+    /// Compute the angular residual between the bearing vector and the 3D point projection vector.
+    /// Return `1 - cos(angle)`.
+    pub fn error(&self, Sample { point, bearing }: &Sample) -> f32 {
+        let new_bearing = (self.to_iso3() * Vec3::from(*point)).normalize();
+        let bearing_vector = Vec3::from(*bearing).normalize();
+        1.0 - bearing_vector.dot(&new_bearing)
     }
 }
 
@@ -319,24 +336,16 @@ fn eigen_decomposition_singular(x: Mat3) -> (Mat3, Vec3) {
 ///
 /// The 3x3 matrix `world_3d_points` contains one 3D point per column.
 /// The 3x3 matrix `bearing_vectors` contains one homogeneous image coordinate per column.
-#[allow(clippy::similar_names)]
-fn compute_poses_nordberg(
-    world_3d_points: &[[f32; 3]; 3],
-    bearing_vectors: &[[f32; 3]; 3],
-) -> Vec<(Mat3, Vec3)> {
+fn compute_poses_nordberg(samples: [Sample; 3]) -> Vec<(Mat3, Vec3)> {
     // Extraction of 3D points vectors
-    let wp1 = Vec3::from(world_3d_points[0]);
-    let wp2 = Vec3::from(world_3d_points[1]);
-    let wp3 = Vec3::from(world_3d_points[2]);
+    let wp1 = Vec3::from(samples[0].point);
+    let wp2 = Vec3::from(samples[1].point);
+    let wp3 = Vec3::from(samples[2].point);
 
     // Extraction of feature vectors
-    let f1 = Vec3::from(bearing_vectors[0]);
-    let f2 = Vec3::from(bearing_vectors[1]);
-    let f3 = Vec3::from(bearing_vectors[2]);
-
-    let f1 = f1.normalize();
-    let f2 = f2.normalize();
-    let f3 = f3.normalize();
+    let f1 = Vec3::from(samples[0].bearing).normalize();
+    let f2 = Vec3::from(samples[1].bearing).normalize();
+    let f3 = Vec3::from(samples[2].bearing).normalize();
 
     // Compute vectors between 3D points.
     let d12 = wp1 - wp2;
@@ -499,11 +508,14 @@ mod tests {
     use super::*;
     use approx::{assert_relative_eq, relative_eq};
     use nalgebra::Point3;
-    use quickcheck_macros;
 
     type V3 = (f32, f32, f32);
 
     const EPSILON_APPROX: f32 = 1e-2;
+
+    fn sample_conv(point: [f32; 3], bearing: [f32; 3]) -> Sample {
+        Sample { point, bearing }
+    }
 
     #[test]
     fn manual_case() {
@@ -522,8 +534,14 @@ mod tests {
         let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
         let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
 
+        let samples = [
+            sample_conv(p1_world, p1_cam),
+            sample_conv(p2_world, p2_cam),
+            sample_conv(p3_world, p3_cam),
+        ];
+
         // Estimate potential poses with P3P.
-        let poses = solve(&[p1_world, p2_world, p3_world], &[p1_cam, p2_cam, p3_cam]);
+        let poses = solve(samples);
         assert!(!poses.is_empty());
 
         // Compare the first pose to ground truth.
@@ -539,7 +557,6 @@ mod tests {
     // Failures log at EPSILON_APPROX = 1e-3: (very long running times)
     // (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 15.0, 35.420532), (89.0, 0.0, 30.208725)
 
-    #[quickcheck_macros::quickcheck]
     fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3) -> bool {
         // Use EPSILON_APPROX to force minimum distance.
         let p1_cam = [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()];
@@ -574,8 +591,14 @@ mod tests {
         let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
         let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
 
+        let samples = [
+            sample_conv(p1_world, p1_cam),
+            sample_conv(p2_world, p2_cam),
+            sample_conv(p3_world, p3_cam),
+        ];
+
         // Estimate potential poses with P3P.
-        let poses = solve(&[p1_world, p2_world, p3_world], &[p1_cam, p2_cam, p3_cam]);
+        let poses = solve(samples);
         if poses.is_empty() {
             eprintln!("cosine: {}", cosine);
         }
