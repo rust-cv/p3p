@@ -33,3 +33,4 @@ rand = { version = "0.7.2", features = ["small_rng"] }
 quickcheck = "0.9.0"
 quickcheck_macros = "0.8.0"
 itertools = "0.8.2"
+arraymap = "0.1.1"

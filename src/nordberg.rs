@@ -28,13 +28,13 @@ type Vec2 = Vector2<f32>;
 type Vec3 = Vector3<f32>;
 type Vec4 = Vector4<f32>;
 
-/// A sample correspondence between a 3d point an a 2d image point.
+/// A sample correspondence between a 3d point an a 2d normalized image coordinate.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct Sample {
     /// The 3d point in world-space
     pub world: [f32; 3],
     /// The 2d point in camera-space
-    pub camera: [f32; 3],
+    pub camera: [f32; 2],
 }
 
 /// Pose of a camera (almost) returned by the `solve` function.
@@ -115,7 +115,7 @@ impl Pose {
     /// Return `1 - cos(angle)`.
     pub fn error(&self, Sample { world, camera }: &Sample) -> f32 {
         let new_bearing = (self.to_iso3() * Vec3::from(*world)).normalize();
-        let bearing_vector = Vec3::from(*camera).normalize();
+        let bearing_vector = Vec2::from(*camera).push(1.0).normalize();
         1.0 - bearing_vector.dot(&new_bearing)
     }
 }
@@ -343,9 +343,9 @@ fn compute_poses_nordberg(samples: [Sample; 3]) -> Vec<(Mat3, Vec3)> {
     let wp3 = Vec3::from(samples[2].world);
 
     // Extraction of feature vectors
-    let f1 = Vec3::from(samples[0].camera).normalize();
-    let f2 = Vec3::from(samples[1].camera).normalize();
-    let f3 = Vec3::from(samples[2].camera).normalize();
+    let f1 = Vec2::from(samples[0].camera).push(1.0).normalize();
+    let f2 = Vec2::from(samples[1].camera).push(1.0).normalize();
+    let f3 = Vec2::from(samples[2].camera).push(1.0).normalize();
 
     // Compute vectors between 3D points.
     let d12 = wp1 - wp2;
@@ -507,24 +507,28 @@ fn compute_poses_nordberg(samples: [Sample; 3]) -> Vec<(Mat3, Vec3)> {
 mod tests {
     use super::*;
     use approx::{assert_relative_eq, relative_eq};
+    use arraymap::ArrayMap;
     use itertools::Itertools;
-    use nalgebra::{Point3, Vector2};
+    use nalgebra::Point3;
     use quickcheck_macros::quickcheck;
 
     type V3 = (f32, f32, f32);
 
     const EPSILON_APPROX: f32 = 1e-2;
 
-    fn sample_conv(world: [f32; 3], camera: [f32; 3]) -> Sample {
+    fn sample_conv(world: [f32; 3], camera: [f32; 2]) -> Sample {
         Sample { world, camera }
     }
 
     #[test]
     fn manual_case() {
         // Define some points in camera coordinates (with z > 0).
-        let p1_cam = [-0.228_125, -0.061_458_334, 1.0];
-        let p2_cam = [0.418_75, -0.581_25, 2.0];
-        let p3_cam = [1.128_125, 0.878_125, 3.0];
+        let camera_depth_points = [
+            [-0.228_125, -0.061_458_334, 1.0],
+            [0.418_75, -0.581_25, 2.0],
+            [1.128_125, 0.878_125, 3.0],
+        ]
+        .map(|&p| Point3::from(p));
 
         // Define the camera pose.
         let rot = UnitQuaternion::from_euler_angles(0.1, 0.2, 0.3);
@@ -532,18 +536,19 @@ mod tests {
         let pose = Iso3::from_parts(trans, rot);
 
         // Compute world coordinates.
-        let p1_world = (pose.inverse() * Point3::from(p1_cam)).coords.into();
-        let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
-        let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
+        let world_points = camera_depth_points.map(|p| pose.inverse() * p);
 
-        let samples = [
-            sample_conv(p1_world, p1_cam),
-            sample_conv(p2_world, p2_cam),
-            sample_conv(p3_world, p3_cam),
-        ];
+        // Compute normalized image coordinates.
+        let normalized_image_coordinates = camera_depth_points.map(|p| (p / p.z).xy());
+
+        let samples: Vec<Sample> = world_points
+            .iter()
+            .zip(&normalized_image_coordinates)
+            .map(|(world, image)| sample_conv(world.coords.into(), image.coords.into()))
+            .collect();
 
         // Estimate potential poses with P3P.
-        let poses = solve(samples);
+        let poses = solve([samples[0], samples[1], samples[2]]);
         assert!(!poses.is_empty());
 
         // Compare the first pose to ground truth.
@@ -562,31 +567,15 @@ mod tests {
     /// This test is ignored because it is random and may fail in CI.
     /// Run `cargo test -- --ignored` to test it.
     #[quickcheck]
+    #[ignore]
     fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3) -> bool {
-        // Use EPSILON_APPROX to force minimum distance.
-        let p1_cam = [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()];
-        let p2_cam = [p2.0, p2.1, EPSILON_APPROX + p2.2.abs()];
-        let p3_cam = [p3.0, p3.1, EPSILON_APPROX + p3.2.abs()];
-
-        // 2d keypoints
-        let p1_2d = Vector2::new(p1_cam[0], p1_cam[1]);
-        let p2_2d = Vector2::new(p2_cam[0], p2_cam[1]);
-        let p3_2d = Vector2::new(p3_cam[0], p3_cam[1]);
-        let p2ds = [p1_2d, p2_2d, p3_2d];
-
-        // Stop if points are colinear.
-        for (a, b, c) in p2ds.iter().tuple_combinations() {
-            if ((a - b).normalize()).dot(&(a - c).normalize()) > 1.0 - 10.0 * EPSILON_APPROX {
-                return true;
-            }
-        }
-
-        // Stop if the keypoint's location on the frame is too close.
-        for (a, b) in p2ds.iter().tuple_combinations() {
-            if (a - b).norm() < 10.0 * EPSILON_APPROX {
-                return true;
-            }
-        }
+        // Define some points in camera coordinates (with z > 0).
+        let camera_depth_points = [
+            [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()],
+            [p2.0, p2.1, EPSILON_APPROX + p2.2.abs()],
+            [p3.0, p3.1, EPSILON_APPROX + p3.2.abs()],
+        ]
+        .map(|&p| Point3::from(p));
 
         // Define the camera pose.
         let rotation = UnitQuaternion::from_euler_angles(rot.0, rot.1, rot.2);
@@ -594,18 +583,33 @@ mod tests {
         let pose = Iso3::from_parts(translation, rotation);
 
         // Compute world coordinates.
-        let p1_world = (pose.inverse() * Point3::from(p1_cam)).coords.into();
-        let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
-        let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
+        let world_points = camera_depth_points.map(|p| pose.inverse() * p);
 
-        let samples = [
-            sample_conv(p1_world, p1_cam),
-            sample_conv(p2_world, p2_cam),
-            sample_conv(p3_world, p3_cam),
-        ];
+        // Compute normalized image coordinates.
+        let normalized_image_coordinates = camera_depth_points.map(|p| (p / p.z).xy());
+
+        // Stop if normalized image coords are colinear.
+        for (a, b, c) in normalized_image_coordinates.iter().tuple_combinations() {
+            if ((a - b).normalize()).dot(&(a - c).normalize()) > 1.0 - 10.0 * EPSILON_APPROX {
+                return true;
+            }
+        }
+
+        // Stop if the keypoint's location on the frame is too close.
+        for (a, b) in normalized_image_coordinates.iter().tuple_combinations() {
+            if (a - b).norm() < 10.0 * EPSILON_APPROX {
+                return true;
+            }
+        }
+
+        let samples: Vec<Sample> = world_points
+            .iter()
+            .zip(&normalized_image_coordinates)
+            .map(|(world, image)| sample_conv(world.coords.into(), image.coords.into()))
+            .collect();
 
         // Estimate potential poses with P3P.
-        let poses = solve(samples);
+        let poses = solve([samples[0], samples[1], samples[2]]);
         assert!(!poses.is_empty());
 
         // Check that at least one estimated pose is near solution.
