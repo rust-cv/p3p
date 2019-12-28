@@ -16,7 +16,7 @@
 use arraymap::ArrayMap;
 use cv::nalgebra::{Isometry3, Matrix3, Translation, UnitQuaternion, Vector3};
 use cv::sample_consensus::Estimator;
-use cv::{KeypointWorldMatch, WorldPoint, WorldPose};
+use cv::{KeyPointWorldMatch, WorldPoint, WorldPose};
 
 type Iso3 = Isometry3<f32>;
 type Mat3 = Matrix3<f32>;
@@ -34,7 +34,7 @@ type Vec3 = Vector3<f32>;
 /// The rotation and pose of the camera itself can easily be retrieved knowing that:
 ///
 /// ![Formula](https://chart.googleapis.com/chart?cht=tx&chl=R_{cam}%20=%20R^T%20\\%20t_{cam}%20=%20-R_{cam}%20\%20t)
-pub fn p3p(samples: [KeypointWorldMatch; 3]) -> Vec<WorldPose> {
+pub fn p3p(samples: [KeyPointWorldMatch; 3]) -> Vec<WorldPose> {
     compute_poses_nordberg(samples)
 }
 
@@ -254,10 +254,10 @@ fn eigen_decomposition_singular(x: Mat3) -> (Mat3, Vec3) {
 ///
 /// The 3x3 matrix `world_3d_points` contains one 3D point per column.
 /// The 3x3 matrix `bearing_vectors` contains one homogeneous image coordinate per column.
-fn compute_poses_nordberg(samples: [KeypointWorldMatch; 3]) -> Vec<WorldPose> {
+fn compute_poses_nordberg(samples: [KeyPointWorldMatch; 3]) -> Vec<WorldPose> {
     // Extraction of 3D points vectors
-    let wps = samples.map(|&KeypointWorldMatch(_, WorldPoint(point))| point);
-    let bearings = samples.map(|KeypointWorldMatch(point, _)| point.to_homogeneous().normalize());
+    let wps = samples.map(|&KeyPointWorldMatch(_, WorldPoint(point))| point);
+    let bearings = samples.map(|KeyPointWorldMatch(point, _)| point.to_homogeneous().normalize());
 
     // Compute vectors between 3D points.
     let d12 = wps[0] - wps[1];
@@ -427,13 +427,13 @@ fn compute_poses_nordberg(samples: [KeypointWorldMatch; 3]) -> Vec<WorldPose> {
 /// See [`p3p`] for details on the algorithm.
 pub struct NordbergEstimator;
 
-impl Estimator<KeypointWorldMatch> for NordbergEstimator {
+impl Estimator<KeyPointWorldMatch> for NordbergEstimator {
     type Model = WorldPose;
     type ModelIter = Vec<WorldPose>;
     const MIN_SAMPLES: usize = 3;
     fn estimate<'a, I>(&self, mut data: I) -> Self::ModelIter
     where
-        I: Iterator<Item = KeypointWorldMatch> + Clone,
+        I: Iterator<Item = KeyPointWorldMatch> + Clone,
     {
         crate::nordberg::p3p([
             data.next().unwrap(),

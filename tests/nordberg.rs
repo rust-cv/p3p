@@ -1,7 +1,7 @@
 use approx::{assert_relative_eq, relative_eq};
 use arraymap::ArrayMap;
 use cv::nalgebra::{Isometry3, Point3, Translation, UnitQuaternion, Vector3};
-use cv::KeypointWorldMatch;
+use cv::KeyPointWorldMatch;
 use itertools::Itertools;
 use p3p::*;
 use quickcheck_macros::quickcheck;
@@ -31,10 +31,10 @@ fn manual_case() {
     // Compute normalized image coordinates.
     let normalized_image_coordinates = camera_depth_points.map(|p| (p / p.z).xy());
 
-    let samples: Vec<KeypointWorldMatch> = world_points
+    let samples: Vec<KeyPointWorldMatch> = world_points
         .iter()
         .zip(&normalized_image_coordinates)
-        .map(|(&world, &image)| KeypointWorldMatch(image.into(), world.into()))
+        .map(|(&world, &image)| KeyPointWorldMatch(image.into(), world.into()))
         .collect();
 
     // Estimate potential poses with P3P.
@@ -92,10 +92,10 @@ fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3) -> bool {
         }
     }
 
-    let samples: Vec<KeypointWorldMatch> = world_points
+    let samples: Vec<KeyPointWorldMatch> = world_points
         .iter()
         .zip(&normalized_image_coordinates)
-        .map(|(&world, &image)| KeypointWorldMatch(image.into(), world.into()))
+        .map(|(&world, &image)| KeyPointWorldMatch(image.into(), world.into()))
         .collect();
 
     // Estimate potential poses with P3P.

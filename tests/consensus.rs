@@ -5,7 +5,7 @@ use cv::nalgebra::{Isometry3, Point3, Translation, UnitQuaternion, Vector3};
 use p3p::nordberg::{NordbergEstimator};
 use rand::{rngs::SmallRng, SeedableRng};
 use cv::sample_consensus::Consensus;
-use cv::{KeypointWorldMatch};
+use cv::KeyPointWorldMatch;
 
 const EPSILON_APPROX: f32 = 1e-2;
 
@@ -33,10 +33,10 @@ fn arrsac_manual() {
     // Compute normalized image coordinates.
     let normalized_image_coordinates = camera_depth_points.map(|p| (p / p.z).xy());
 
-    let samples: Vec<KeypointWorldMatch> = world_points
+    let samples: Vec<KeyPointWorldMatch> = world_points
         .iter()
         .zip(&normalized_image_coordinates)
-        .map(|(&world, &image)| KeypointWorldMatch(image.into(), world.into()))
+        .map(|(&world, &image)| KeyPointWorldMatch(image.into(), world.into()))
         .collect();
 
     // Estimate potential poses with P3P.
