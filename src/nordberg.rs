@@ -31,9 +31,7 @@ type Vec3 = Vector3<f32>;
 ///   (also sometimes called "bearing vectors").
 /// - ![lambda_i](https://chart.googleapis.com/chart?cht=tx&chl=lambda_i) are the signed distances from the camera.
 ///
-/// The rotation and pose of the camera itself can easily be retrieved knowing that:
-///
-/// ![Formula](https://chart.googleapis.com/chart?cht=tx&chl=R_{cam}%20=%20R^T%20\\%20t_{cam}%20=%20-R_{cam}%20\%20t)
+/// The rotation and pose of the camera itself can be retrieved by converting the `WorldPose` into a `CameraPose`.
 pub fn p3p(samples: [KeyPointWorldMatch; 3]) -> Vec<WorldPose> {
     compute_poses_nordberg(samples)
 }
