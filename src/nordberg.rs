@@ -13,94 +13,27 @@
 //!
 //! [lambda-twist-github]: https://github.com/midjji/lambdatwist-p3p
 
-use nalgebra::{Isometry3, Matrix3, Quaternion, Translation, UnitQuaternion, Vector3, Vector4};
+use arraymap::ArrayMap;
+use cv::nalgebra::{Isometry3, Matrix3, Translation, UnitQuaternion, Vector3};
+use cv::sample_consensus::Estimator;
+use cv::{KeyPointWorldMatch, WorldPoint, WorldPose};
 
 type Iso3 = Isometry3<f32>;
 type Mat3 = Matrix3<f32>;
 type Vec3 = Vector3<f32>;
-type Vec4 = Vector4<f32>;
 
-/// Pose of a camera (almost) returned by the `solve` function.
-/// Beware that the result of the `solve` function isn't exactly the
-/// rotation and translation of the camera itself in world coordinates.
-/// It is the rotation and translation pair satisfying the equation:
-/// $$
-/// \lambda_i \ \bm{y_i} = \bm{R \ x_i} + \bm{t},\quad i \in \\{1, 2, 3\\}
-/// $$
+/// Return 0 to 4 potential solutions to the equation:
 ///
-/// - $\bm{x_i}$ are the 3D point world coordinates.
-/// - $\bm{y_i}$ are the image coordinates $\bm{y_i} \ \text{\textasciitilde} \ (u_i, v_i, 1)$
-///   also sometimes called "bearing vectors".
-/// - $\lambda_i$ are the signed distances from the camera.
+/// ![Formula](https://chart.googleapis.com/chart?cht=tx&chl=\lambda_i%20\%20y_i%20=%20R%20x_i%20%2B%20t,\quad%20i%20\in%20\{1,%202,%203\})
 ///
-/// The rotation and pose of the camera itself can easily be retrieved knowing that:
+/// - ![x_i](https://chart.googleapis.com/chart?cht=tx&chl=x_i) are the 3D point world coordinates.
+/// - ![y_i](https://chart.googleapis.com/chart?cht=tx&chl=y_i) are the image coordinates ![Formula](https://chart.googleapis.com/chart?cht=tx&chl=y_i%20\%20\sim%20\%20(u_i,\%20v_i,\%201))
+///   (also sometimes called "bearing vectors").
+/// - ![lambda_i](https://chart.googleapis.com/chart?cht=tx&chl=lambda_i) are the signed distances from the camera.
 ///
-/// $$
-/// \begin{cases}
-///     \bm{R_{cam}} = \bm{R^T} \\\\
-///     \bm{t_{cam}} = \bm{-R_{cam} \ t}
-/// \end{cases}
-/// $$
-#[derive(Debug, Copy, Clone)]
-pub struct Pose {
-    /// Rotation given as a unit quaternion of the form `[x, y, z, w]`
-    /// where the real coefficient is the last one.
-    pub rotation: [f32; 4],
-
-    /// Translation.
-    pub translation: [f32; 3],
-}
-
-/// Return 0 to 4 potential $(\bm{R}, \bm{t})$ solutions to the equation:
-/// $$
-/// \lambda_i \ \bm{y_i} = \bm{R \ x_i} + \bm{t},\quad i \in \\{1, 2, 3\\}
-/// $$
-///
-/// - $\bm{x_i}$ are the 3D point world coordinates.
-/// - $\bm{y_i}$ are the image coordinates $\bm{y_i} \ \text{\textasciitilde} \ (u_i, v_i, 1)$
-///   also sometimes called "bearing vectors".
-/// - $\lambda_i$ are the signed distances from the camera.
-///
-/// The input arguments should be considered as
-/// `world_3d_points = [` $\bm{x_1}, \bm{x_2}, \bm{x_3}$ `]`
-/// and similarly for `bearing_vectors`.
-pub fn solve(world_3d_points: &[[f32; 3]; 3], bearing_vectors: &[[f32; 3]; 3]) -> Vec<Pose> {
-    compute_poses_nordberg(world_3d_points, bearing_vectors)
-        .into_iter()
-        .map(|(rot, trans)| {
-            let rotation = UnitQuaternion::from_matrix(&rot);
-            let translation = Translation::from(trans);
-            Pose::from_iso3(Iso3::from_parts(translation, rotation))
-        })
-        .collect()
-}
-
-/// Compute the angular residual between the bearing vector and the 3D point projection vector.
-/// Return `1 - cos(angle)`.
-pub fn error(point_3d: &[f32; 3], bearing_vector: &[f32; 3], pose: &Pose) -> f32 {
-    let new_bearing = (pose.to_iso3() * Vec3::from(*point_3d)).normalize();
-    let bearing_vector = Vec3::from(*bearing_vector).normalize();
-    1.0 - bearing_vector.dot(&new_bearing)
-}
-
-// Private functions ###########################################################
-
-impl Pose {
-    /// Convert from nalgebra Isometry3 type.
-    fn from_iso3(iso3: Iso3) -> Self {
-        Self {
-            rotation: iso3.rotation.into_inner().coords.into(),
-            translation: iso3.translation.vector.into(),
-        }
-    }
-
-    /// Convert to nalgebra Isometry3 type.
-    fn to_iso3(&self) -> Iso3 {
-        let rot_quat = Quaternion::from(Vec4::from(self.rotation));
-        let rot = UnitQuaternion::from_quaternion(rot_quat);
-        let trans = Translation::from(Vec3::from(self.translation));
-        Iso3::from_parts(trans, rot)
-    }
+/// The rotation and pose of the camera itself can be retrieved by converting the [`cv::WorldPose`] into a [`cv::CameraPose`].
+pub fn p3p(samples: [KeyPointWorldMatch; 3]) -> Vec<WorldPose> {
+    compute_poses_nordberg(samples)
 }
 
 /// Refine a valid solution with a Gauss-Newton Solver.
@@ -319,29 +252,15 @@ fn eigen_decomposition_singular(x: Mat3) -> (Mat3, Vec3) {
 ///
 /// The 3x3 matrix `world_3d_points` contains one 3D point per column.
 /// The 3x3 matrix `bearing_vectors` contains one homogeneous image coordinate per column.
-#[allow(clippy::similar_names)]
-fn compute_poses_nordberg(
-    world_3d_points: &[[f32; 3]; 3],
-    bearing_vectors: &[[f32; 3]; 3],
-) -> Vec<(Mat3, Vec3)> {
+fn compute_poses_nordberg(samples: [KeyPointWorldMatch; 3]) -> Vec<WorldPose> {
     // Extraction of 3D points vectors
-    let wp1 = Vec3::from(world_3d_points[0]);
-    let wp2 = Vec3::from(world_3d_points[1]);
-    let wp3 = Vec3::from(world_3d_points[2]);
-
-    // Extraction of feature vectors
-    let f1 = Vec3::from(bearing_vectors[0]);
-    let f2 = Vec3::from(bearing_vectors[1]);
-    let f3 = Vec3::from(bearing_vectors[2]);
-
-    let f1 = f1.normalize();
-    let f2 = f2.normalize();
-    let f3 = f3.normalize();
+    let wps = samples.map(|&KeyPointWorldMatch(_, WorldPoint(point))| point);
+    let bearings = samples.map(|KeyPointWorldMatch(point, _)| point.to_homogeneous().normalize());
 
     // Compute vectors between 3D points.
-    let d12 = wp1 - wp2;
-    let d13 = wp1 - wp3;
-    let d23 = wp2 - wp3;
+    let d12 = wps[0] - wps[1];
+    let d13 = wps[0] - wps[2];
+    let d23 = wps[1] - wps[2];
     let d12xd13 = d12.cross(&d13);
 
     // "a12" is the squared distance between 3D points 1 and 2.
@@ -350,9 +269,9 @@ fn compute_poses_nordberg(
     let a23 = d23.norm_squared();
 
     // "c31" is the cosine between bearing vectors 3 and 1.
-    let c12 = f1.dot(&f2);
-    let c23 = f2.dot(&f3);
-    let c31 = f3.dot(&f1);
+    let c12 = bearings[0].dot(&bearings[1]);
+    let c23 = bearings[1].dot(&bearings[2]);
+    let c31 = bearings[2].dot(&bearings[0]);
     let blob = c12 * c23 * c31 - 1.0;
 
     // "s31" is the sine between bearing vectors 3 and 1.
@@ -471,9 +390,9 @@ fn compute_poses_nordberg(
             // Refine estimated depth values.
             let lambda_refined = gauss_newton_refine_lambda(lambda, a12, a13, a23, b12, b13, b23);
 
-            let ry1 = lambda_refined[0] * f1;
-            let ry2 = lambda_refined[1] * f2;
-            let ry3 = lambda_refined[2] * f3;
+            let ry1 = lambda_refined[0] * bearings[0];
+            let ry2 = lambda_refined[1] * bearings[1];
+            let ry3 = lambda_refined[2] * bearings[2];
 
             let yd1 = ry1 - ry2;
             let yd2 = ry1 - ry3;
@@ -487,107 +406,37 @@ fn compute_poses_nordberg(
             );
 
             let rot = y_mat * x_mat;
-            (rot, ry1 - rot * wp1)
+            (rot, ry1 - rot * wps[0].coords)
+        })
+        .map(|(rot, trans)| {
+            let rotation = UnitQuaternion::from_matrix(&rot);
+            let translation = Translation::from(trans);
+            WorldPose(Iso3::from_parts(translation, rotation))
         })
         .collect()
 }
 
-// Tests #######################################################################
+/// This implements the [`Estimator`] trait.
+///
+/// This uses the algorithm from the paper
+/// "Lambda Twist: An Accurate Fast Robust Perspective Three Point (P3P) Solver"
+/// to estimate four potential poses for the p3p problem.
+///
+/// See [`p3p`] for details on the algorithm.
+pub struct NordbergEstimator;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::{assert_relative_eq, relative_eq};
-    use nalgebra::Point3;
-    use quickcheck_macros;
-
-    type V3 = (f32, f32, f32);
-
-    const EPSILON_APPROX: f32 = 1e-2;
-
-    #[test]
-    fn manual_case() {
-        // Define some points in camera coordinates (with z > 0).
-        let p1_cam = [-0.228_125, -0.061_458_334, 1.0];
-        let p2_cam = [0.418_75, -0.581_25, 2.0];
-        let p3_cam = [1.128_125, 0.878_125, 3.0];
-
-        // Define the camera pose.
-        let rot = UnitQuaternion::from_euler_angles(0.1, 0.2, 0.3);
-        let trans = Translation::from(Vec3::new(0.1, 0.2, 0.3));
-        let pose = Iso3::from_parts(trans, rot);
-
-        // Compute world coordinates.
-        let p1_world = (pose.inverse() * Point3::from(p1_cam)).coords.into();
-        let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
-        let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
-
-        // Estimate potential poses with P3P.
-        let poses = solve(&[p1_world, p2_world, p3_world], &[p1_cam, p2_cam, p3_cam]);
-        assert!(!poses.is_empty());
-
-        // Compare the first pose to ground truth.
-        let p3p_iso3 = poses[0].to_iso3();
-        assert_relative_eq!(rot, p3p_iso3.rotation, epsilon = EPSILON_APPROX);
-        assert_relative_eq!(trans, p3p_iso3.translation, epsilon = EPSILON_APPROX);
-    }
-
-    // Failures log at EPSILON_APPROX = 1e-2:
-    // (0.0, 15.0, 61.0), (0.0, 0.0, 0.0), (-44.782043, -69.0, 15.0), (8.574509, -65.91768, 68.265625), (-14.3312, -23.98317, 67.01338)
-    // (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (75.34378, 71.73302, 97.50447), (-29.456757, 64.21983, 34.308487), (-1.483345, 97.73132, 62.84854)
-
-    // Failures log at EPSILON_APPROX = 1e-3: (very long running times)
-    // (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 15.0, 35.420532), (89.0, 0.0, 30.208725)
-
-    #[quickcheck_macros::quickcheck]
-    fn non_degenerate_case(rot: V3, trans: V3, p1: V3, p2: V3, p3: V3) -> bool {
-        // Use EPSILON_APPROX to force minimum distance.
-        let p1_cam = [p1.0, p1.1, EPSILON_APPROX + p1.2.abs()];
-        let p2_cam = [p2.0, p2.1, EPSILON_APPROX + p2.2.abs()];
-        let p3_cam = [p3.0, p3.1, EPSILON_APPROX + p3.2.abs()];
-
-        // Stop if points are colinear.
-        let d12 = Vec3::from(p1_cam) - Vec3::from(p2_cam);
-        let d13 = Vec3::from(p1_cam) - Vec3::from(p3_cam);
-        if d12.norm() < EPSILON_APPROX || d13.norm() < EPSILON_APPROX {
-            return true;
-        }
-        let cosine = d12.normalize().dot(&d13.normalize());
-        if cosine.abs() > 1.0 - EPSILON_APPROX {
-            return true;
-        }
-
-        // Also stop if points are orthogonal (weird but it makes it fail).
-        // Example failure detected by quickcheck:
-        // p1 = (0, 0, 0)   p2 = (0, 0, 1)   p3 = (0, 3, 0)
-        if cosine.abs() < EPSILON_APPROX {
-            return true;
-        }
-
-        // Define the camera pose.
-        let rotation = UnitQuaternion::from_euler_angles(rot.0, rot.1, rot.2);
-        let translation = Translation::from(Vec3::new(trans.0, trans.1, trans.2));
-        let pose = Iso3::from_parts(translation, rotation);
-
-        // Compute world coordinates.
-        let p1_world = (pose.inverse() * Point3::from(p1_cam)).coords.into();
-        let p2_world = (pose.inverse() * Point3::from(p2_cam)).coords.into();
-        let p3_world = (pose.inverse() * Point3::from(p3_cam)).coords.into();
-
-        // Estimate potential poses with P3P.
-        let poses = solve(&[p1_world, p2_world, p3_world], &[p1_cam, p2_cam, p3_cam]);
-        if poses.is_empty() {
-            eprintln!("cosine: {}", cosine);
-        }
-        assert!(!poses.is_empty());
-
-        // Check that at least one estimated pose is near solution.
-        poses.iter().fold(false, |already_true, pose| {
-            let p3p_pose = pose.to_iso3();
-            let same_rot = relative_eq!(rotation, p3p_pose.rotation, epsilon = EPSILON_APPROX);
-            let same_trans =
-                relative_eq!(translation, p3p_pose.translation, epsilon = EPSILON_APPROX);
-            already_true || (same_rot && same_trans)
-        })
+impl Estimator<KeyPointWorldMatch> for NordbergEstimator {
+    type Model = WorldPose;
+    type ModelIter = Vec<WorldPose>;
+    const MIN_SAMPLES: usize = 3;
+    fn estimate<'a, I>(&self, mut data: I) -> Self::ModelIter
+    where
+        I: Iterator<Item = KeyPointWorldMatch> + Clone,
+    {
+        crate::nordberg::p3p([
+            data.next().unwrap(),
+            data.next().unwrap(),
+            data.next().unwrap(),
+        ])
     }
 }
