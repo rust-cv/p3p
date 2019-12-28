@@ -15,20 +15,13 @@ license = "MPL-2.0" # SPDX license
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "katex-header.html" ]
 
-[features]
-default = []
-consensus = ["sample-consensus"]
-
 [dependencies]
-sample-consensus = { version = "0.1.0", optional = true }
-
-[dependencies.nalgebra]
-version = "0.18.1"
-default-features = false
+cv = { package = "cv-core", version = "0.1.2" }
+arraymap = "0.1.1"
 
 [dev-dependencies]
 approx = "0.3"
-arrsac = "0.1.0"
+arrsac = "0.2.0"
 rand = { version = "0.7.2", features = ["small_rng"] }
 quickcheck = "0.9.0"
 quickcheck_macros = "0.8.0"

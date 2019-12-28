@@ -1,17 +1,13 @@
-#![cfg(feature = "consensus")]
 use approx::assert_relative_eq;
 use arraymap::ArrayMap;
 use arrsac::{Arrsac, Config};
-use nalgebra::{Isometry3, Point3, Translation, UnitQuaternion, Vector3};
-use p3p::nordberg::{NordbergEstimator, Sample};
+use cv::nalgebra::{Isometry3, Point3, Translation, UnitQuaternion, Vector3};
+use p3p::nordberg::{NordbergEstimator};
 use rand::{rngs::SmallRng, SeedableRng};
-use sample_consensus::Consensus;
+use cv::sample_consensus::Consensus;
+use cv::{KeypointWorldMatch};
 
 const EPSILON_APPROX: f32 = 1e-2;
-
-fn sample_conv(world: [f32; 3], camera: [f32; 2]) -> Sample {
-    Sample { world, camera }
-}
 
 #[test]
 fn arrsac_manual() {
@@ -37,18 +33,17 @@ fn arrsac_manual() {
     // Compute normalized image coordinates.
     let normalized_image_coordinates = camera_depth_points.map(|p| (p / p.z).xy());
 
-    let samples: Vec<Sample> = world_points
+    let samples: Vec<KeypointWorldMatch> = world_points
         .iter()
         .zip(&normalized_image_coordinates)
-        .map(|(world, image)| sample_conv(world.coords.into(), image.coords.into()))
+        .map(|(&world, &image)| KeypointWorldMatch(image.into(), world.into()))
         .collect();
 
     // Estimate potential poses with P3P.
     // Arrsac should use the fourth point to filter and find only one model from the 4 generated.
     let pose = arrsac
-        .model(&NordbergEstimator, &samples)
-        .unwrap()
-        .to_iso3();
+        .model(&NordbergEstimator, samples.iter().cloned())
+        .unwrap();
 
     // Compare the pose to ground truth.
     assert_relative_eq!(rot, pose.rotation, epsilon = EPSILON_APPROX);
